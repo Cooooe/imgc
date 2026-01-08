@@ -248,8 +248,8 @@ function printUsage(): void {
 옵션:
   -q, --quality <값>     압축 품질 1-100 (기본: 80)
   -f, --format <포맷>    출력 포맷: png, jpg, webp, svg
-  -k, --keep             원본 파일 보존 (새 파일 생성)
-  -r, --replace          원본 파일 대치 (기본값)
+  -k, --keep             원본 파일 보존 (기본값)
+  -r, --replace          원본 파일 대치
   -t, --target-size <크기>  목표 파일 크기 (예: 200KB, 1MB)
   -h, --help             도움말 출력
 
@@ -269,7 +269,7 @@ function parseArgs(args: string[]): { files: string[]; options: Options } {
   const files: string[] = [];
   const options: Options = {
     quality: 80,
-    keep: false,
+    keep: true,
   };
 
   let i = 0;
