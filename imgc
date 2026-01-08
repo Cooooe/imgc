@@ -1,0 +1,23 @@
+#!/bin/bash
+# 심볼릭 링크를 따라가서 원본 스크립트 위치 찾기
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# 인자 처리: 파일 경로는 절대 경로로 변환
+args=()
+for arg in "$@"; do
+  # 옵션이 아니고 파일이 존재하면 절대 경로로 변환
+  if [[ ! "$arg" =~ ^- ]] && [ -e "$arg" ]; then
+    args+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+  else
+    args+=("$arg")
+  fi
+done
+
+# 빌드된 결과물 실행
+node "$SCRIPT_DIR/dist/index.js" "${args[@]}"

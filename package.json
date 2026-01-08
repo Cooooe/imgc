@@ -1,0 +1,29 @@
+{
+  "name": "imgc",
+  "version": "1.0.0",
+  "description": "이미지 압축 및 포맷 변환 CLI 도구",
+  "type": "module",
+  "bin": {
+    "imgc": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "sharp": "^0.33.2",
+    "svgo": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
