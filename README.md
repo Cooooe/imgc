@@ -5,14 +5,16 @@ CLI 기반 이미지 압축 및 포맷 변환 도구
 ## 설치
 
 ```bash
-# 프로젝트 디렉토리에서 의존성 설치 및 빌드
-cd ~/Documents/Tools/imgc
+git clone <repository-url>
+cd imgc
 pnpm install
 pnpm build
 
-# 심볼릭 링크 등록 (전역 사용)
-~/Documents/Tools/link-tool add imgc
+# 전역 명령어로 등록
+npm link
 ```
+
+설치 후 `imgc` 명령어를 전역에서 사용할 수 있습니다.
 
 ## 개발
 
@@ -45,16 +47,16 @@ imgc <파일...> [옵션]
 | 옵션 | 설명 | 기본값 |
 |------|------|--------|
 | `-q, --quality <값>` | 압축 품질 (1-100) | 80 |
-| `-f, --format <포맷>` | 출력 포맷: png, jpg, webp, svg | 원본 유지 |
-| `-k, --keep` | 원본 파일 보존 (`_compressed` 접미사로 생성) | - |
-| `-r, --replace` | 원본 파일 대치 | (기본값) |
+| `-f, --format <포맷>` | 출력 포맷: png, jpg, webp, svg, ico | 원본 유지 |
+| `-k, --keep` | 원본 파일 보존 (`_compressed` 접미사로 생성) | (기본값) |
+| `-r, --replace` | 원본 파일 대치 | - |
 | `-t, --target-size <크기>` | 목표 파일 크기 (예: 200KB, 1MB) | - |
 | `-h, --help` | 도움말 출력 | - |
 
 ### 예시
 
 ```bash
-# 기본 압축 (80% 품질)
+# 기본 압축 (80% 품질, 원본 보존)
 imgc image.png
 
 # 60% 품질로 압축
@@ -63,26 +65,30 @@ imgc *.png -q 60
 # WebP 포맷으로 변환
 imgc photo.jpg -f webp
 
-# 원본 보존하며 압축
-imgc logo.png -k
+# 파비콘(ICO) 생성
+imgc logo.png -f ico
+
+# 원본 대치하며 압축
+imgc logo.png -r
 
 # 100KB 목표로 압축 (자동 품질 조절)
 imgc banner.jpg -t 100KB
 
 # 여러 파일 일괄 처리
-imgc image1.png image2.jpg image3.webp -q 70 -k
+imgc image1.png image2.jpg image3.webp -q 70
 ```
 
 ## 지원 포맷
 
 | 입력 | 출력 | 비고 |
 |------|------|------|
-| PNG | PNG, JPG, WebP | 래스터 포맷 간 변환 |
-| JPG/JPEG | PNG, JPG, WebP | 래스터 포맷 간 변환 |
-| WebP | PNG, JPG, WebP | 래스터 포맷 간 변환 |
-| SVG | SVG, PNG, JPG, WebP | 벡터 → 래스터 변환 가능 |
+| PNG | PNG, JPG, WebP, ICO | 래스터 포맷 간 변환 |
+| JPG/JPEG | PNG, JPG, WebP, ICO | 래스터 포맷 간 변환 |
+| WebP | PNG, JPG, WebP, ICO | 래스터 포맷 간 변환 |
+| SVG | SVG, PNG, JPG, WebP, ICO | 벡터 → 래스터 변환 가능 |
 
 - 래스터(PNG/JPG/WebP) → SVG 변환은 지원하지 않습니다 (벡터화 불가)
+- ICO 출력은 파비콘용으로 16x16, 32x32, 48x48 크기를 포함합니다
 
 ## 목표 용량 압축
 
@@ -114,6 +120,7 @@ imgc/
 
 - [sharp](https://sharp.pixelplumbing.com/) - 래스터 이미지 처리
 - [svgo](https://github.com/svg/svgo) - SVG 최적화
+- [png-to-ico](https://www.npmjs.com/package/png-to-ico) - ICO 변환
 - [tsup](https://tsup.egoist.dev/) - 번들링
 - [vitest](https://vitest.dev/) - 테스트
 
