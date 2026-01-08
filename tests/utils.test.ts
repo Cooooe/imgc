@@ -77,6 +77,10 @@ describe("isSupportedFormat", () => {
     expect(isSupportedFormat("bmp")).toBe(false);
     expect(isSupportedFormat("tiff")).toBe(false);
   });
+
+  it("ico는 입력 포맷으로 지원하지 않는다", () => {
+    expect(isSupportedFormat("ico")).toBe(false);
+  });
 });
 
 describe("isRasterFormat", () => {
@@ -117,6 +121,15 @@ describe("getOutputPath", () => {
   it("keep=true이고 포맷 변환 시 접미사와 확장자 모두 변경한다", () => {
     expect(getOutputPath("/path/to/image.png", "webp", true)).toBe(
       "/path/to/image_compressed.webp"
+    );
+  });
+
+  it("ico 포맷으로 변환 시 확장자를 ico로 변경한다", () => {
+    expect(getOutputPath("/path/to/logo.png", "ico", false)).toBe(
+      "/path/to/logo.ico"
+    );
+    expect(getOutputPath("/path/to/logo.png", "ico", true)).toBe(
+      "/path/to/logo_compressed.ico"
     );
   });
 });

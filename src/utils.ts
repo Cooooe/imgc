@@ -2,7 +2,7 @@ import * as path from "path";
 
 // 타입 정의
 export type SupportedFormat = "png" | "jpg" | "jpeg" | "webp" | "svg";
-export type OutputFormat = "png" | "jpg" | "webp" | "svg" | "jpeg";
+export type OutputFormat = "png" | "jpg" | "webp" | "svg" | "jpeg" | "ico";
 
 export interface Options {
   quality: number;

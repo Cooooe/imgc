@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { optimize } from "svgo";
+import pngToIco from "png-to-ico";
 import * as fs from "fs/promises";
 import * as path from "path";
 import {
@@ -88,6 +89,32 @@ async function compressRaster(
   }
 
   return pipeline.toBuffer();
+}
+
+// ICO 변환 (파비콘용)
+async function convertToIco(inputPath: string, inputExt: string): Promise<Buffer> {
+  const sizes = [16, 32, 48];
+
+  let sourceBuffer: Buffer;
+  if (inputExt === "svg") {
+    // SVG는 고해상도로 래스터화 후 리사이즈
+    sourceBuffer = await sharp(await fs.readFile(inputPath), { density: 300 })
+      .png()
+      .toBuffer();
+  } else {
+    sourceBuffer = await fs.readFile(inputPath);
+  }
+
+  const pngBuffers = await Promise.all(
+    sizes.map(size =>
+      sharp(sourceBuffer)
+        .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
+        .toBuffer()
+    )
+  );
+
+  return pngToIco(pngBuffers);
 }
 
 // 목표 용량에 맞춰 압축 (이진 탐색)
@@ -194,7 +221,13 @@ async function processImage(
   try {
     let outputBuffer: Buffer;
 
-    if (inputExt === "svg" && outputFormat === "svg") {
+    if (outputFormat === "ico") {
+      if (options.targetSize) {
+        throw new Error("ICO 변환에서는 목표 크기 옵션을 사용할 수 없습니다");
+      }
+      outputBuffer = await convertToIco(absolutePath, inputExt);
+      await fs.writeFile(outputPath, outputBuffer);
+    } else if (inputExt === "svg" && outputFormat === "svg") {
       outputBuffer = await optimizeSvg(absolutePath, outputPath);
     } else if (options.targetSize) {
       const result = await compressToTargetSize(
@@ -247,7 +280,7 @@ function printUsage(): void {
 
 옵션:
   -q, --quality <값>     압축 품질 1-100 (기본: 80)
-  -f, --format <포맷>    출력 포맷: png, jpg, webp, svg
+  -f, --format <포맷>    출력 포맷: png, jpg, webp, svg, ico
   -k, --keep             원본 파일 보존 (기본값)
   -r, --replace          원본 파일 대치
   -t, --target-size <크기>  목표 파일 크기 (예: 200KB, 1MB)
@@ -257,11 +290,12 @@ function printUsage(): void {
   imgc image.png                    # 기본 압축 (80%)
   imgc *.png -q 60                  # 60% 품질로 압축
   imgc photo.jpg -f webp            # WebP로 변환
-  imgc logo.png -k                  # 원본 보존
+  imgc logo.png -f ico              # 파비콘(ICO) 생성
   imgc banner.jpg -t 100KB          # 100KB 목표 압축
 
-지원 포맷: PNG, JPG, WebP, SVG
+지원 포맷: PNG, JPG, WebP, SVG (입력) / PNG, JPG, WebP, SVG, ICO (출력)
 ※ 래스터(PNG/JPG/WebP) → SVG 변환은 지원하지 않습니다
+※ ICO 출력은 16x16, 32x32, 48x48 크기를 포함합니다
 `);
 }
 
@@ -288,8 +322,8 @@ function parseArgs(args: string[]): { files: string[]; options: Options } {
       options.quality = value;
     } else if (arg === "-f" || arg === "--format") {
       const format = args[++i]?.toLowerCase();
-      if (!format || !["png", "jpg", "webp", "svg"].includes(format)) {
-        console.error("오류: 포맷은 png, jpg, webp, svg 중 하나여야 합니다");
+      if (!format || !["png", "jpg", "webp", "svg", "ico"].includes(format)) {
+        console.error("오류: 포맷은 png, jpg, webp, svg, ico 중 하나여야 합니다");
         process.exit(1);
       }
       options.format = format as OutputFormat;
