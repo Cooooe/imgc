@@ -2,13 +2,23 @@ import * as path from "path";
 
 // 타입 정의
 export type SupportedFormat = "png" | "jpg" | "jpeg" | "webp" | "svg";
-export type OutputFormat = "png" | "jpg" | "webp" | "svg" | "jpeg" | "ico";
+export type OutputFormat =
+  | "png"
+  | "jpg"
+  | "webp"
+  | "svg"
+  | "jpeg"
+  | "ico"
+  | "avif";
 
 export interface Options {
   quality: number;
   format?: OutputFormat;
   keep: boolean;
   targetSize?: number;
+  recursive: boolean;
+  maxWidth?: number;
+  yes: boolean;
 }
 
 export interface ProcessResult {
@@ -58,6 +68,16 @@ export function isRasterFormat(ext: string): boolean {
   return ["png", "jpg", "jpeg", "webp"].includes(ext);
 }
 
+// keep 모드에서 산출물에 붙는 접미사 (재처리 방지에도 사용)
+export const COMPRESSED_SUFFIX = "_compressed";
+
+// 이미 압축된 산출물(_compressed)인지 판별 (디렉터리 스캔 시 재처리 방지)
+export function isCompressedArtifact(filePath: string): boolean {
+  const ext = getExtension(filePath);
+  const baseName = path.basename(filePath, `.${ext}`);
+  return baseName.endsWith(COMPRESSED_SUFFIX);
+}
+
 export function getOutputPath(
   inputPath: string,
   outputFormat: OutputFormat | undefined,
@@ -69,7 +89,7 @@ export function getOutputPath(
   const newExt = outputFormat || ext;
 
   if (keep) {
-    return path.join(dir, `${baseName}_compressed.${newExt}`);
+    return path.join(dir, `${baseName}${COMPRESSED_SUFFIX}.${newExt}`);
   }
 
   if (outputFormat && outputFormat !== ext) {

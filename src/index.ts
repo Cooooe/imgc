@@ -1,359 +1,100 @@
-import sharp from "sharp";
-import { optimize } from "svgo";
-import pngToIco from "png-to-ico";
-import * as fs from "fs/promises";
 import * as path from "path";
-import {
-  parseSize,
-  formatSize,
-  getExtension,
-  isSupportedFormat,
-  isRasterFormat,
-  getOutputPath,
-  type OutputFormat,
-  type Options,
-  type ProcessResult,
-} from "./utils.js";
+import * as fs from "fs/promises";
+import * as readline from "node:readline/promises";
+import { formatSize, type Options, type ProcessResult } from "./utils.js";
+import { collectImages } from "./walk.js";
+import { processImage } from "./processor.js";
+import { parseArgs, printUsage } from "./cli.js";
 
-// SVG 최적화
-async function optimizeSvg(
-  inputPath: string,
-  outputPath: string
-): Promise<Buffer> {
-  const svgContent = await fs.readFile(inputPath, "utf-8");
-  const result = optimize(svgContent, {
-    multipass: true,
-    plugins: [
-      {
-        name: "preset-default",
-        params: {
-          overrides: {
-            removeViewBox: false,
-          },
-        },
-      },
-      "removeDimensions",
-    ],
-  });
+const CONCURRENCY = 8;
 
-  const optimizedBuffer = Buffer.from(result.data);
-  await fs.writeFile(outputPath, optimizedBuffer);
-  return optimizedBuffer;
-}
-
-// SVG를 래스터 포맷으로 변환
-async function svgToRaster(
-  inputPath: string,
-  outputFormat: OutputFormat,
-  quality: number
-): Promise<Buffer> {
-  const svgBuffer = await fs.readFile(inputPath);
-  let pipeline = sharp(svgBuffer, { density: 300 });
-
-  switch (outputFormat) {
-    case "png":
-      pipeline = pipeline.png({ quality, compressionLevel: 9 });
-      break;
-    case "jpg":
-      pipeline = pipeline.jpeg({ quality, mozjpeg: true });
-      break;
-    case "webp":
-      pipeline = pipeline.webp({ quality });
-      break;
-  }
-
-  return pipeline.toBuffer();
-}
-
-// 래스터 이미지 압축/변환
-async function compressRaster(
-  inputPath: string,
-  outputFormat: OutputFormat,
-  quality: number
-): Promise<Buffer> {
-  let pipeline = sharp(inputPath);
-
-  switch (outputFormat) {
-    case "png":
-      pipeline = pipeline.png({ quality, compressionLevel: 9 });
-      break;
-    case "jpg":
-    case "jpeg":
-      pipeline = pipeline.jpeg({ quality, mozjpeg: true });
-      break;
-    case "webp":
-      pipeline = pipeline.webp({ quality });
-      break;
-    default:
-      throw new Error(`지원하지 않는 출력 포맷: ${outputFormat}`);
-  }
-
-  return pipeline.toBuffer();
-}
-
-// ICO 변환 (파비콘용)
-async function convertToIco(inputPath: string, inputExt: string): Promise<Buffer> {
-  const sizes = [16, 32, 48];
-
-  let sourceBuffer: Buffer;
-  if (inputExt === "svg") {
-    // SVG는 고해상도로 래스터화 후 리사이즈
-    sourceBuffer = await sharp(await fs.readFile(inputPath), { density: 300 })
-      .png()
-      .toBuffer();
-  } else {
-    sourceBuffer = await fs.readFile(inputPath);
-  }
-
-  const pngBuffers = await Promise.all(
-    sizes.map(size =>
-      sharp(sourceBuffer)
-        .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-        .png()
-        .toBuffer()
-    )
-  );
-
-  return pngToIco(pngBuffers);
-}
-
-// 목표 용량에 맞춰 압축 (이진 탐색)
-async function compressToTargetSize(
-  inputPath: string,
-  outputFormat: OutputFormat,
-  targetSize: number,
-  inputExt: string
-): Promise<{ buffer: Buffer; quality: number }> {
-  let low = 1;
-  let high = 100;
-  let bestBuffer: Buffer | null = null;
-  let bestQuality = 80;
-  let bestDiff = Infinity;
-
-  for (let i = 0; i < 10 && low <= high; i++) {
-    const mid = Math.floor((low + high) / 2);
-
-    let buffer: Buffer;
-    if (inputExt === "svg") {
-      buffer = await svgToRaster(inputPath, outputFormat, mid);
-    } else {
-      buffer = await compressRaster(inputPath, outputFormat, mid);
-    }
-
-    const diff = Math.abs(buffer.length - targetSize);
-
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestBuffer = buffer;
-      bestQuality = mid;
-    }
-
-    if (buffer.length > targetSize) {
-      high = mid - 1;
-    } else if (buffer.length < targetSize) {
-      low = mid + 1;
-    } else {
-      break;
-    }
-  }
-
-  if (!bestBuffer) {
-    throw new Error("압축 실패");
-  }
-
-  return { buffer: bestBuffer, quality: bestQuality };
-}
-
-// 단일 이미지 처리
-async function processImage(
-  inputPath: string,
-  options: Options
-): Promise<ProcessResult> {
-  const absolutePath = path.resolve(inputPath);
-  const inputExt = getExtension(absolutePath);
-
-  try {
-    await fs.access(absolutePath);
-  } catch {
-    return {
-      inputPath: absolutePath,
-      outputPath: "",
-      inputSize: 0,
-      outputSize: 0,
-      format: inputExt,
-      success: false,
-      error: "파일을 찾을 수 없습니다",
-    };
-  }
-
-  if (!isSupportedFormat(inputExt)) {
-    return {
-      inputPath: absolutePath,
-      outputPath: "",
-      inputSize: 0,
-      outputSize: 0,
-      format: inputExt,
-      success: false,
-      error: `지원하지 않는 포맷: ${inputExt}. (png, jpg, webp, svg만 지원)`,
-    };
-  }
-
-  const outputFormat =
-    options.format ||
-    ((inputExt === "jpeg" ? "jpg" : inputExt) as OutputFormat);
-
-  if (isRasterFormat(inputExt) && outputFormat === "svg") {
-    return {
-      inputPath: absolutePath,
-      outputPath: "",
-      inputSize: 0,
-      outputSize: 0,
-      format: inputExt,
-      success: false,
-      error: "래스터 이미지를 SVG로 변환할 수 없습니다 (벡터화 불가)",
-    };
-  }
-
-  const inputStats = await fs.stat(absolutePath);
-  const inputSize = inputStats.size;
-  const outputPath = getOutputPath(absolutePath, options.format, options.keep);
-
-  try {
-    let outputBuffer: Buffer;
-
-    if (outputFormat === "ico") {
-      if (options.targetSize) {
-        throw new Error("ICO 변환에서는 목표 크기 옵션을 사용할 수 없습니다");
-      }
-      outputBuffer = await convertToIco(absolutePath, inputExt);
-      await fs.writeFile(outputPath, outputBuffer);
-    } else if (inputExt === "svg" && outputFormat === "svg") {
-      outputBuffer = await optimizeSvg(absolutePath, outputPath);
-    } else if (options.targetSize) {
-      const result = await compressToTargetSize(
-        absolutePath,
-        outputFormat,
-        options.targetSize,
-        inputExt
-      );
-      outputBuffer = result.buffer;
-      await fs.writeFile(outputPath, outputBuffer);
-    } else if (inputExt === "svg") {
-      outputBuffer = await svgToRaster(absolutePath, outputFormat, options.quality);
-      await fs.writeFile(outputPath, outputBuffer);
-    } else {
-      outputBuffer = await compressRaster(absolutePath, outputFormat, options.quality);
-      await fs.writeFile(outputPath, outputBuffer);
-    }
-
-    if (!options.keep && outputPath !== absolutePath) {
-      await fs.unlink(absolutePath);
-    }
-
-    return {
-      inputPath: absolutePath,
-      outputPath,
-      inputSize,
-      outputSize: outputBuffer.length,
-      format: outputFormat,
-      success: true,
-    };
-  } catch (err) {
-    return {
-      inputPath: absolutePath,
-      outputPath,
-      inputSize,
-      outputSize: 0,
-      format: outputFormat,
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-function printUsage(): void {
-  console.log(`
-이미지 압축/변환 도구
-
-사용법:
-  imgc <파일...> [옵션]
-
-옵션:
-  -q, --quality <값>     압축 품질 1-100 (기본: 80)
-  -f, --format <포맷>    출력 포맷: png, jpg, webp, svg, ico
-  -k, --keep             원본 파일 보존 (기본값)
-  -r, --replace          원본 파일 대치
-  -t, --target-size <크기>  목표 파일 크기 (예: 200KB, 1MB)
-  -h, --help             도움말 출력
-
-예시:
-  imgc image.png                    # 기본 압축 (80%)
-  imgc *.png -q 60                  # 60% 품질로 압축
-  imgc photo.jpg -f webp            # WebP로 변환
-  imgc logo.png -f ico              # 파비콘(ICO) 생성
-  imgc banner.jpg -t 100KB          # 100KB 목표 압축
-
-지원 포맷: PNG, JPG, WebP, SVG (입력) / PNG, JPG, WebP, SVG, ICO (출력)
-※ 래스터(PNG/JPG/WebP) → SVG 변환은 지원하지 않습니다
-※ ICO 출력은 16x16, 32x32, 48x48 크기를 포함합니다
-`);
-}
-
-function parseArgs(args: string[]): { files: string[]; options: Options } {
+// 입력 인자(파일/폴더)로부터 처리 대상 목록을 수집한다.
+// 폴더가 하나라도 포함되면 dirTraversed=true (대치 시 확인 프롬프트 트리거)
+async function gatherTargets(
+  inputs: string[],
+  recursive: boolean
+): Promise<{ files: string[]; dirTraversed: boolean }> {
+  const seen = new Set<string>();
   const files: string[] = [];
-  const options: Options = {
-    quality: 80,
-    keep: true,
-  };
+  let dirTraversed = false;
 
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i];
-
-    if (arg === "-h" || arg === "--help") {
-      printUsage();
-      process.exit(0);
-    } else if (arg === "-q" || arg === "--quality") {
-      const value = parseInt(args[++i], 10);
-      if (isNaN(value) || value < 1 || value > 100) {
-        console.error("오류: 품질은 1-100 사이의 값이어야 합니다");
-        process.exit(1);
+  for (const input of inputs) {
+    let collected: string[];
+    try {
+      const stats = await fs.stat(input);
+      if (stats.isDirectory()) {
+        dirTraversed = true;
       }
-      options.quality = value;
-    } else if (arg === "-f" || arg === "--format") {
-      const format = args[++i]?.toLowerCase();
-      if (!format || !["png", "jpg", "webp", "svg", "ico"].includes(format)) {
-        console.error("오류: 포맷은 png, jpg, webp, svg, ico 중 하나여야 합니다");
-        process.exit(1);
-      }
-      options.format = format as OutputFormat;
-    } else if (arg === "-k" || arg === "--keep") {
-      options.keep = true;
-    } else if (arg === "-r" || arg === "--replace") {
-      options.keep = false;
-    } else if (arg === "-t" || arg === "--target-size") {
-      const sizeStr = args[++i];
-      if (!sizeStr) {
-        console.error("오류: 목표 크기를 지정해야 합니다");
-        process.exit(1);
-      }
-      try {
-        options.targetSize = parseSize(sizeStr);
-      } catch (err) {
-        console.error(`오류: ${err instanceof Error ? err.message : err}`);
-        process.exit(1);
-      }
-    } else if (!arg.startsWith("-")) {
-      files.push(arg);
-    } else {
-      console.error(`알 수 없는 옵션: ${arg}`);
-      printUsage();
-      process.exit(1);
+      collected = await collectImages(input, recursive);
+    } catch {
+      // 존재하지 않거나 접근 불가 → processImage가 에러로 보고하도록 그대로 추가
+      collected = [input];
     }
-    i++;
+
+    for (const file of collected) {
+      const key = path.resolve(file);
+      if (!seen.has(key)) {
+        seen.add(key);
+        files.push(file);
+      }
+    }
   }
 
-  return { files, options };
+  return { files, dirTraversed };
+}
+
+async function confirm(message: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const answer = await rl.question(message);
+  rl.close();
+  return /^y(es)?$/i.test(answer.trim());
+}
+
+// 동시성 상한을 두고 작업을 병렬 실행 (완료 순서대로 onDone 호출)
+async function runWithConcurrency(
+  files: string[],
+  limit: number,
+  options: Options,
+  onDone: (result: ProcessResult) => void
+): Promise<ProcessResult[]> {
+  const results: ProcessResult[] = new Array(files.length);
+  let next = 0;
+
+  async function runner(): Promise<void> {
+    while (true) {
+      const index = next++;
+      if (index >= files.length) {
+        return;
+      }
+      const result = await processImage(files[index], options);
+      results[index] = result;
+      onDone(result);
+    }
+  }
+
+  const runners = Array.from({ length: Math.min(limit, files.length) }, () =>
+    runner()
+  );
+  await Promise.all(runners);
+  return results;
+}
+
+function printResult(result: ProcessResult): void {
+  const name = path.basename(result.inputPath);
+  if (result.success) {
+    const reduction = (
+      ((result.inputSize - result.outputSize) / result.inputSize) *
+      100
+    ).toFixed(1);
+    console.log(
+      `✅ ${name}  ${formatSize(result.inputSize)} → ${formatSize(result.outputSize)} (${reduction}% 감소)`
+    );
+  } else {
+    console.log(`❌ ${name}  ${result.error}`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -364,35 +105,48 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const { files, options } = parseArgs(args);
+  const { files: inputs, options } = parseArgs(args);
 
-  if (files.length === 0) {
-    console.error("오류: 처리할 파일을 지정해야 합니다");
+  if (inputs.length === 0) {
+    console.error("오류: 처리할 파일 또는 폴더를 지정해야 합니다");
     printUsage();
     process.exit(1);
   }
 
-  console.log(`\n📷 이미지 처리 시작 (품질: ${options.quality}%)\n`);
+  const { files, dirTraversed } = await gatherTargets(inputs, options.recursive);
 
-  const results: ProcessResult[] = [];
+  if (files.length === 0) {
+    console.error("처리할 이미지가 없습니다");
+    process.exit(1);
+  }
 
-  for (const file of files) {
-    process.stdout.write(`처리 중: ${path.basename(file)}... `);
-    const result = await processImage(file, options);
-    results.push(result);
-
-    if (result.success) {
-      const reduction = (
-        ((result.inputSize - result.outputSize) / result.inputSize) *
-        100
-      ).toFixed(1);
-      console.log(
-        `✅ ${formatSize(result.inputSize)} → ${formatSize(result.outputSize)} (${reduction}% 감소)`
+  // 폴더 일괄 대치는 되돌릴 수 없으므로 확인을 받는다
+  if (!options.keep && dirTraversed && !options.yes) {
+    if (!process.stdin.isTTY) {
+      console.error(
+        `오류: ${files.length}개 원본을 대치합니다. 비대화형 환경에서는 --yes 또는 --keep 이 필요합니다`
       );
-    } else {
-      console.log(`❌ ${result.error}`);
+      process.exit(1);
+    }
+    const ok = await confirm(
+      `⚠️  ${files.length}개 원본 파일을 대치합니다 (되돌릴 수 없음). 계속할까요? [y/N] `
+    );
+    if (!ok) {
+      console.log("취소되었습니다");
+      process.exit(0);
     }
   }
+
+  console.log(
+    `\n📷 이미지 ${files.length}개 처리 시작 (품질: ${options.quality}%${options.keep ? ", 원본 보존" : ", 원본 대치"})\n`
+  );
+
+  const results = await runWithConcurrency(
+    files,
+    CONCURRENCY,
+    options,
+    printResult
+  );
 
   const successful = results.filter((r) => r.success);
   const failed = results.filter((r) => !r.success);
